@@ -1,0 +1,46 @@
+{
+  "name": "intelligent-customer-service-agent",
+  "version": "1.0.0",
+  "description": "智能客服 SaaS 平台 - Intelligent Customer Service Agent",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "dev": "concurrently \"pnpm dev:backend\" \"pnpm dev:frontend\"",
+    "dev:backend": "pnpm --filter backend dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "build": "pnpm build:backend && pnpm build:frontend && pnpm build:widget",
+    "build:backend": "pnpm --filter backend build",
+    "build:frontend": "pnpm --filter frontend build",
+    "build:widget": "pnpm --filter widget build",
+    "test": "pnpm --filter backend test",
+    "test:integration": "pnpm --filter backend test:integration",
+    "test:coverage": "pnpm --filter backend test:coverage",
+    "test:perf": "artillery run tests/performance/artillery-config.yml",
+    "test:phase4": "./run-phase4-tests.sh",
+    "lint": "eslint . --ext .ts,.tsx",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "db:migrate": "pnpm --filter backend db:migrate",
+    "db:generate": "pnpm --filter backend db:generate",
+    "docker:up": "docker-compose -f docker/docker-compose.yml up -d",
+    "docker:down": "docker-compose -f docker/docker-compose.yml down",
+    "docker:prod": "docker-compose -f docker/docker-compose.prod.yml up -d"
+  },
+  "keywords": [
+    "customer-service",
+    "chatbot",
+    "saas",
+    "ai-agent"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "concurrently": "^8.2.2",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react": "^7.34.0",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,357 @@
+// Prisma Schema for Intelligent Customer Service Agent
+// 数据库：PostgreSQL 15 + pgvector
+
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["vector"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== 多租户系统 ====================
+
+/// 租户表 - 每个企业客户一个租户
+model Tenant {
+  id          String   @id @default(uuid())
+  name        String   // 租户名称（企业名称）
+  slug        String   @unique // 租户标识（用于子域名）
+  status      TenantStatus @default(ACTIVE) // 租户状态
+  plan        PlanType @default(BASIC) // 订阅套餐
+  settings    Json     @default("{}") // 租户配置（JSON）
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // 关联数据
+  users       User[]
+  knowledgeBases KnowledgeBase[]
+  conversations Conversation[]
+  agents      Agent[]
+  roles       Role[]
+  
+  @@index([slug])
+  @@index([status])
+}
+
+enum TenantStatus {
+  ACTIVE      // 正常
+  SUSPENDED   // 暂停
+  DELETED     // 已删除
+}
+
+enum PlanType {
+  BASIC       // 基础版（¥299/月）
+  PRO         // 专业版（¥699/月）
+  ENTERPRISE  // 企业版（¥1999/月）
+}
+
+// ==================== 用户系统 ====================
+
+/// 用户表 - 租户下的用户（客服坐席、管理员等）
+model User {
+  id          String   @id @default(uuid())
+  tenantId    String
+  email       String
+  passwordHash String
+  name        String
+  avatar      String?
+  status      UserStatus @default(ACTIVE)
+  lastLoginAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // 关联
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  roles       UserRole[]
+  conversations Conversation[] // 作为坐席处理的对话
+  agents      Agent[]  // 创建的客服Agent
+  
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([status])
+}
+
+enum UserStatus {
+  ACTIVE      // 正常
+  INACTIVE    // 未激活
+  SUSPENDED   // 暂停
+  DELETED     // 已删除
+}
+
+/// 用户 - 角色关联表
+model UserRole {
+  id        String @id @default(uuid())
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+  
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+// ==================== RBAC 权限系统 ====================
+
+/// 角色表
+model Role {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String   // 角色名称（如：管理员、客服坐席）
+  description String?
+  permissions Json     @default("[]") // 权限列表（JSON 数组）
+  isSystem    Boolean  @default(false) // 是否系统内置角色
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // 关联
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  users       UserRole[]
+  
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+/// 权限定义（硬编码在代码中，此处仅作记录）
+/// 权限列表：
+/// - tenant:manage (租户管理)
+/// - user:manage (用户管理)
+/// - knowledge:read (知识库读取)
+/// - knowledge:write (知识库写入)
+/// - knowledge:delete (知识库删除)
+/// - conversation:read (对话记录读取)
+/// - conversation:write (对话记录写入)
+/// - analytics:read (数据分析读取)
+/// - settings:manage (系统设置管理)
+/// - billing:manage (计费管理)
+
+// ==================== 知识库系统 ====================
+
+/// 知识库表
+model KnowledgeBase {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String   // 知识库名称
+  description String?
+  status      KnowledgeBaseStatus @default(ACTIVE)
+  settings    Json     @default("{}") // 配置（如切分规则）
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // 关联
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  documents   Document[]
+  qaPairs     QAPair[]
+  chunks      KnowledgeChunk[]
+  
+  @@index([tenantId])
+  @@index([status])
+}
+
+enum KnowledgeBaseStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+/// 文档表 - 上传的原始文件
+model Document {
+  id          String   @id @default(uuid())
+  knowledgeBaseId String
+  name        String   // 文件名
+  originalName String // 原始文件名
+  mimeType    String   // 文件类型
+  size        Int      // 文件大小（字节）
+  storageKey  String   // MinIO 存储键
+  status      DocumentStatus @default(PENDING) // 解析状态
+  parsedAt    DateTime? // 解析完成时间
+  metadata    Json     @default("{}") // 元数据
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // 关联
+  knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id])
+  chunks      KnowledgeChunk[]
+  
+  @@index([knowledgeBaseId])
+  @@index([status])
+}
+
+enum DocumentStatus {
+  PENDING     // 待解析
+  PROCESSING  // 解析中
+  COMPLETED   // 已完成
+  FAILED      // 失败
+}
+
+/// 知识片段表 - 文档切分后的片段
+model KnowledgeChunk {
+  id          String   @id @default(uuid())
+  knowledgeBaseId String
+  documentId  String?
+  content     String   // 片段内容
+  metadata    Json     @default("{}") // 元数据（标题、段落号等）
+  embedding   Unsupported("vector(1536)")? // 向量嵌入（阿里云 1536 维）
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // 关联
+  knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id])
+  document    Document? @relation(fields: [documentId], references: [id])
+  
+  @@index([knowledgeBaseId])
+  @@index([documentId])
+}
+
+/// 问答对表 - 手动配置的 QA
+model QAPair {
+  id          String   @id @default(uuid())
+  knowledgeBaseId String
+  question    String
+  answer      String   // 标准答案
+  answerVariants String[] // 答案变体（数组）
+  category    String?  // 分类
+  tags        String[] // 标签
+  priority    Int      @default(0) // 优先级（越高越优先）
+  status      QAPairStatus @default(ACTIVE)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // 关联
+  knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id])
+  
+  @@index([knowledgeBaseId])
+  @@index([category])
+  @@index([status])
+}
+
+enum QAPairStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+  DELETED
+}
+
+// ==================== 对话系统 ====================
+
+/// 对话表
+model Conversation {
+  id          String   @id @default(uuid())
+  tenantId    String
+  agentId     String?
+  userId      String?  // 终端用户 ID（如果已登录）
+  agentUserId String?  // 处理坐席 ID（转人工后）
+  status      ConversationStatus @default(ACTIVE)
+  source      ConversationSource @default(WEB) // 来源渠道
+  metadata    Json     @default("{}") // 元数据（用户信息、URL 等）
+  startedAt   DateTime @default(now())
+  endedAt     DateTime?
+  resolvedAt  DateTime? // 解决时间
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // 关联
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  agent       Agent?   @relation(fields: [agentId], references: [id])
+  user        User?    @relation(fields: [userId], references: [id])
+  agentUser   User?    @relation("AgentConversations", fields: [agentUserId], references: [id])
+  messages    Message[]
+  
+  @@index([tenantId])
+  @@index([agentId])
+  @@index([status])
+  @@index([startedAt])
+}
+
+enum ConversationStatus {
+  ACTIVE      // 进行中
+  TRANSFERRED // 已转人工
+  RESOLVED    // 已解决
+  CLOSED      // 已关闭
+}
+
+enum ConversationSource {
+  WEB         // Web Widget
+  WECHAT      // 微信公众号
+  WECHAT_WORK // 企业微信
+  API         // API 调用
+}
+
+/// 消息表
+model Message {
+  id          String   @id @default(uuid())
+  conversationId String
+  role        MessageRole // 角色（user/assistant/system）
+  content     String   // 消息内容
+  intent      String?  // 识别的意图
+  confidence  Float?   // 置信度
+  metadata    Json     @default("{}") // 元数据（引用片段等）
+  createdAt   DateTime @default(now())
+  
+  // 关联
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+// ==================== Agent 配置 ====================
+
+/// 客服Agent 配置表
+model Agent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String   // Agent 名称
+  description String?
+  avatar      String?  // 头像 URL
+  config      Json     @default("{}") // 配置（Prompt、阈值等）
+  status      AgentStatus @default(ACTIVE)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // 关联
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  user        User?    @relation(fields: [tenantId], references: [id]) // 创建者
+  conversations Conversation[]
+  
+  @@index([tenantId])
+  @@index([status])
+}
+
+enum AgentStatus {
+  ACTIVE
+  INACTIVE
+  DELETED
+}
+
+// ==================== 满意度评价系统 ====================
+
+/// 满意度评价表
+model SatisfactionRating {
+  id             String   @id @default(uuid())
+  conversationId String   @unique // 每个对话只能评价一次
+  tenantId       String
+  agentId        String?  // 关联坐席（如果是人工对话）
+  rating         Int      // 1-5 分
+  comment        String?  // 评价内容
+  tags           String[] // 评价标签（如：响应快、专业、友好）
+  createdAt      DateTime @default(now())
+
+  // 关联
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  agent          Agent?   @relation(fields: [agentId], references: [id])
+
+  @@index([tenantId])
+  @@index([agentId])
+  @@index([createdAt])
+}

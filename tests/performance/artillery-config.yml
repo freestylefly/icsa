@@ -1,0 +1,125 @@
+# Artillery.io 性能测试配置
+# 用于测试智能客服平台的性能和负载能力
+
+config:
+  target: "http://localhost:3001"
+  phases:
+    # 第一阶段：负载递增（2 分钟）
+    - duration: 120
+      arrivalRate: 5
+      rampTo: 50
+      name: "负载递增"
+    
+    # 第二阶段：稳定负载（5 分钟）
+    - duration: 300
+      arrivalRate: 50
+      name: "稳定负载"
+    
+    # 第三阶段：峰值负载（3 分钟）
+    - duration: 180
+      arrivalRate: 50
+      rampTo: 200
+      name: "峰值负载"
+    
+    # 第四阶段：恢复（2 分钟）
+    - duration: 120
+      arrivalRate: 200
+      rampTo: 10
+      name: "恢复"
+  
+  defaults:
+    headers:
+      Content-Type: "application/json"
+  
+  variables:
+    tenantId: "tenant_test_001"
+  
+  # 指标配置
+  plugins:
+    metrics-by-endpoint: {}
+  
+  # 期望指标
+  ensure:
+    p95: 500  # P95 响应时间 < 500ms
+    maxErrorRate: 1  # 错误率 < 1%
+
+scenarios:
+  # 场景 1: 健康检查
+  - name: "健康检查"
+    weight: 10
+    flow:
+      - get:
+          url: "/health"
+          expect:
+            - statusCode: 200
+
+  # 场景 2: 对话统计查询
+  - name: "获取对话统计"
+    weight: 20
+    flow:
+      - get:
+          url: "/api/analytics/conversations"
+          headers:
+            Authorization: "Bearer {{token}}"
+            x-tenant-id: "{{tenantId}}"
+          expect:
+            - statusCode: 200
+
+  # 场景 3: 坐席状态更新
+  - name: "更新坐席状态"
+    weight: 15
+    flow:
+      - put:
+          url: "/api/agents/{{agentId}}/status"
+          headers:
+            Authorization: "Bearer {{token}}"
+            x-tenant-id: "{{tenantId}}"
+          json:
+            status: "online"
+          expect:
+            - statusCode: 200
+
+  # 场景 4: 会话分配
+  - name: "会话分配"
+    weight: 25
+    flow:
+      - post:
+          url: "/api/agents/sessions/distribute"
+          headers:
+            Authorization: "Bearer {{token}}"
+            x-tenant-id: "{{tenantId}}"
+          json:
+            conversationId: "{{conversationId}}"
+            strategy: "load_balance"
+          expect:
+            - statusCode: 200
+
+  # 场景 5: 满意度查询
+  - name: "获取满意度统计"
+    weight: 15
+    flow:
+      - get:
+          url: "/api/analytics/satisfaction"
+          headers:
+            Authorization: "Bearer {{token}}"
+            x-tenant-id: "{{tenantId}}"
+          expect:
+            - statusCode: 200
+
+  # 场景 6: 常见问题查询
+  - name: "获取常见问题"
+    weight: 15
+    flow:
+      - get:
+          url: "/api/analytics/faq/top"
+          headers:
+            Authorization: "Bearer {{token}}"
+            x-tenant-id: "{{tenantId}}"
+          expect:
+            - statusCode: 200
+
+# 自定义函数（用于生成动态数据）
+functions:
+  generateToken: "./custom-functions.js:generateToken"
+  generateAgentId: "./custom-functions.js:generateAgentId"
+  generateConversationId: "./custom-functions.js:generateConversationId"

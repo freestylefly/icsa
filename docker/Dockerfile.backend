@@ -1,0 +1,21 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# 安装 pnpm
+RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+
+# 复制 package.json
+COPY apps/backend/package.json ./apps/backend/
+COPY packages/shared/package.json ./packages/shared/
+
+# 安装依赖
+RUN cd apps/backend && pnpm install --frozen-lockfile
+
+COPY . .
+
+WORKDIR /app/apps/backend
+
+EXPOSE 3001
+
+CMD ["pnpm", "dev"]
