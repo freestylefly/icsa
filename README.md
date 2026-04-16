@@ -1,6 +1,6 @@
 <div align="center">
 
-![ICSA Banner](https://cdn.toobetterjavaer.com/studymore/pmhub-%E6%99%BA%E8%83%BD%E5%AE%A2%E6%9C%8D.png)
+![ICSA Banner](https://raw.githubusercontent.com/freestylefly/icsa/main/docs/icsa-github-banner.png)
 
 # ICSA - 智能客服Agent
 
